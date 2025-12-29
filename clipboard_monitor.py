@@ -1,31 +1,72 @@
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
+import os
+import time
+from urllib.parse import unquote
 
-def monitor_clipboard():
-    # 取得系統剪貼簿
+# 初始化 Gtk
+Gtk.init(None)
+
+def get_atom_name(atom):
+    """
+    穩健地取得 Atom 的名稱字串
+    """
+    try:
+        # 嘗試使用 .name() 方法
+        if hasattr(atom, 'name'):
+            return atom.name()
+        # 嘗試使用 Gdk 提供的靜態轉換方法
+        return Gdk.Atom.to_string(atom)
+    except:
+        return str(atom)
+
+def check_clipboard():
     clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+    target_atom = Gdk.Atom.intern("TARGETS", False)
+    targets = clipboard.wait_for_contents(target_atom)
     
-    print("=== 正在監控剪貼簿，請在 Windows 複製檔案後觀察 Linux 端 ===")
+    # 這裡放你的斷點
+    # import ipdb; ipdb.set_trace()
 
-    def callback(cb, selection_data):
-        # 取得目前剪貼簿宣告的所有格式 (Targets)
-        # 檔案複製通常會顯示為 'text/uri-list'
-        targets = cb.wait_for_contents("TARGETS")
-        if targets:
-            print(f"\n[偵測到新宣告] 擁有者提供的格式包含: {targets.get_targets()}")
-        
-        # 嘗試讀取檔案路徑 (URI List)
-        # 注意：在 VMware 中，這通常會在「貼上」動作發生時才動態生成路徑
-        text_data = cb.wait_for_text()
-        if text_data:
-            print(f"[內容細節]: {text_data}")
-        else:
-            print("[訊息]: 目前剪貼簿內沒有文字或路徑資訊（可能尚未觸發傳輸）")
+    if targets is not None:
+        try:
+            # import ipdb; ipdb.set_trace()
+            raw_targets = targets.get_targets()
+            # 將整個回傳值轉成一個大字串，不管它是列表還是物件
+            all_targets_str = str(raw_targets)
+            
+            # 只要字串裡出現 text/uri-list，就代表有檔案要傳
+            if 'text/uri-list' in all_targets_str:
+                print(f"\n[{time.strftime('%H:%M:%S')}] 偵測到 VMware 檔案宣告！")
+                
+                # 這一步是關鍵：強迫 vmtoolsd 把檔案寫入 /tmp
+                print("正在要求具體路徑 (觸發 Lazy Transfer)...")
+                uri_text = clipboard.wait_for_text() 
+                print("取得的 URI 列表：", uri_text)
+                if uri_text:
+                    uris = uri_text.strip().split('\n')
+                    for uri in uris:
+                        if uri.startswith('file://'):
+                            clean_path = unquote(uri.replace('file://', '').strip())
+                            if os.path.exists(clean_path):
+                                print(f"✅ 檔案已落地：{clean_path}")
+                                print(f"   大小：{os.path.getsize(clean_path)} bytes")
+                            else:
+                                print(f"⚠️ 路徑已獲取，但檔案尚未出現在 /tmp (或正在傳輸)")
+        except Exception as e:
+            print(f"解析過程發生錯誤: {e}")
+    
+    return True
 
-    # 監控剪貼簿內容變更
-    clipboard.connect("owner-change", callback)
+print("====================================================")
+print("   VMware Clipboard Monitor (Robust Version)")
+print("====================================================")
+print("請在 Windows 複製一個檔案，然後觀察這裡...")
+
+GLib.timeout_add(500, check_clipboard)
+
+try:
     Gtk.main()
-
-if __name__ == "__main__":
-    monitor_clipboard()
+except KeyboardInterrupt:
+    print("\n監控已停止。")
