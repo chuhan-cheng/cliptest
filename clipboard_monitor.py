@@ -38,22 +38,15 @@ def check_clipboard():
         
         # 只要字串裡出現 text/uri-list，就代表有檔案要傳
         if 'text/uri-list' in target_list:
-            print(f"\n[{time.strftime('%H:%M:%S')}] 偵測到 VMware 檔案宣告！")
-            
-            # 這一步是關鍵：強迫 vmtoolsd 把檔案寫入 /tmp
-            print("正在要求具體路徑 (觸發 Lazy Transfer)...")
-            uri_text = clipboard.wait_for_text() 
-            print("取得的 URI 列表：", uri_text)
-            if uri_text:
-                uris = uri_text.strip().split('\n')
+            # 指定要拿 text/uri-list 格式
+            uri_atom = Gdk.Atom.intern("text/uri-list", False)
+            selection_data = clipboard.wait_for_contents(uri_atom)
+
+            if selection_data:
+                # 使用專門解析 URI 的方法
+                uris = selection_data.get_uris()
                 for uri in uris:
-                    if uri.startswith('file://'):
-                        clean_path = unquote(uri.replace('file://', '').strip())
-                        if os.path.exists(clean_path):
-                            print(f"✅ 檔案已落地：{clean_path}")
-                            print(f"   大小：{os.path.getsize(clean_path)} bytes")
-                        else:
-                            print(f"⚠️ 路徑已獲取，但檔案尚未出現在 /tmp (或正在傳輸)")
+                    print(f"正規取得的 URI: {uri}")
     except Exception as e:
         print(f"解析過程發生錯誤: {e}")
     
